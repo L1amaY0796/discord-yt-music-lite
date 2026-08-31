@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import type { Readable } from 'node:stream';
+import type { Readable, Writable } from 'node:stream';
 import {
   AudioPlayerStatus,
   StreamType,
@@ -22,7 +22,6 @@ export interface ResolvedTrack extends QueuedTrack {
   id: string;
   title: string;
   durationSec: number | null;
-  streamUrl: string;
 }
 
 export class StreamPlayerError extends Error {
@@ -35,13 +34,12 @@ export class StreamPlayerError extends Error {
 const YT_DLP_BIN = 'yt-dlp';
 const FFMPEG_BIN = 'ffmpeg';
 const RESOLVE_TIMEOUT_MS = 15_000;
+const YT_DLP_FORMAT = 'bestaudio[protocol!=m3u8]/bestaudio/best';
 
 interface YtDlpMetadata {
   id?: string;
   title?: string;
   duration?: number;
-  url?: string;
-  requested_downloads?: Array<{ url?: string }>;
 }
 
 // Typed event overloads for StreamPlayer's EventEmitter surface.
@@ -52,41 +50,33 @@ export declare interface StreamPlayer {
 }
 
 /**
- * 每個語音連線對應一個 StreamPlayer。負責：播放前呼叫 yt-dlp 解析直接音訊網址，
- * 交給 ffmpeg 轉成 PCM 後串流進 Discord，全程不落地。
+ * 每個語音連線對應一個 StreamPlayer。負責：播放前呼叫 yt-dlp 取得歌曲 metadata，
+ * 播放時讓 yt-dlp 自己下載音訊（處理 CDN 的 range/續傳），透過 pipe 交給 ffmpeg 轉成
+ * PCM 後串流進 Discord，全程不落地。
  *
  * 呼叫端務必監聽 'error' 事件——EventEmitter 在沒有 listener 時對 'error' 會直接 throw。
  */
 export class StreamPlayer extends EventEmitter {
   private readonly player: AudioPlayer;
-  private ffmpeg: ChildProcessByStdio<null, Readable, Readable> | null = null;
+  private ytdlp: ChildProcessByStdio<null, Readable, Readable> | null = null;
+  private ffmpeg: ChildProcessByStdio<Writable, Readable, Readable> | null = null;
   private current: ResolvedTrack | null = null;
   private destroyed = false;
 
   constructor(connection: VoiceConnection) {
     super();
-    this.player = createAudioPlayer({ debug: true });
+    this.player = createAudioPlayer();
     connection.subscribe(this.player);
-
-    const guildId = connection.joinConfig.guildId;
-
-    // TEMP: 診斷用，問題排除後移除。
-    this.player.on('debug', (message) => {
-      console.log(`[audio debug][guild ${guildId}] ${message}`);
-    });
-    this.player.on('stateChange', (oldState, newState) => {
-      console.log(`[audio state][guild ${guildId}] ${oldState.status} -> ${newState.status}`);
-    });
 
     this.player.on(AudioPlayerStatus.Idle, () => {
       const finished = this.current;
       this.current = null;
-      this.killFfmpeg();
+      this.killPipeline();
       this.emit('trackEnd', finished);
     });
 
     this.player.on('error', (err) => {
-      this.killFfmpeg();
+      this.killPipeline();
       this.emit('error', new StreamPlayerError('播放時發生錯誤，已跳過這首歌', err));
     });
   }
@@ -102,11 +92,11 @@ export class StreamPlayer extends EventEmitter {
   async play(track: QueuedTrack): Promise<ResolvedTrack> {
     const resolved = await this.resolve(track);
     // 解析 yt-dlp 期間可能已經被 /stop 銷毀（destroy()），這裡才拿到結果就直接放棄，
-    // 避免對著已經斷開的連線重新 spawn ffmpeg、或補發一則「正在播放」訊息。
+    // 避免對著已經斷開的連線重新 spawn 下載/轉檔程序、或補發一則「正在播放」訊息。
     if (this.destroyed) {
       throw new StreamPlayerError('播放已取消（連線已關閉）');
     }
-    const resource = this.createResource(resolved.streamUrl);
+    const resource = this.createResource(track.query);
     this.current = resolved;
     this.player.play(resource);
     this.emit('trackStart', resolved);
@@ -119,7 +109,7 @@ export class StreamPlayer extends EventEmitter {
   }
 
   stop(): void {
-    this.killFfmpeg();
+    this.killPipeline();
     this.current = null;
     this.player.stop(true);
   }
@@ -139,13 +129,7 @@ export class StreamPlayer extends EventEmitter {
   }
 
   private async resolve(track: QueuedTrack): Promise<ResolvedTrack> {
-    const args = [
-      '-f', 'bestaudio[protocol!=m3u8]/bestaudio/best',
-      '--no-playlist',
-      '--no-warnings',
-      '-j',
-      track.query,
-    ];
+    const args = ['-f', YT_DLP_FORMAT, '--no-playlist', '--no-warnings', '-j', track.query];
 
     const stdout = await this.runYtDlp(args);
 
@@ -156,17 +140,11 @@ export class StreamPlayer extends EventEmitter {
       throw new StreamPlayerError('無法解析歌曲資訊，請換一首試試', err);
     }
 
-    const streamUrl = data.url ?? data.requested_downloads?.[0]?.url;
-    if (!streamUrl) {
-      throw new StreamPlayerError('找不到可播放的音訊來源', data);
-    }
-
     return {
       ...track,
       id: data.id ?? track.query,
       title: data.title ?? track.title ?? track.query,
       durationSec: typeof data.duration === 'number' ? data.duration : null,
-      streamUrl,
     };
   }
 
@@ -215,16 +193,27 @@ export class StreamPlayer extends EventEmitter {
     });
   }
 
-  private createResource(streamUrl: string): AudioResource {
-    this.killFfmpeg();
+  /**
+   * 播放來源改成讓 yt-dlp 自己下載（-o -）再 pipe 給 ffmpeg 轉檔，而不是把解析出來的
+   * 一次性 googlevideo 網址直接交給 ffmpeg 打。原因：那個網址常常會被 CDN 中途軟性截斷
+   * （不是網路斷線，是對方主動把這次回應結束掉），ffmpeg 收到 EOF 後會誤判成正常播完、
+   * 乾淨結束（exit code 0），完全不會觸發任何錯誤訊息，實際上歌根本沒播完。yt-dlp 自己
+   * 下載時有處理這類 CDN range/續傳的邏輯，比 ffmpeg 單純的 -reconnect 系列參數可靠。
+   */
+  private createResource(query: string): AudioResource {
+    this.killPipeline();
+
+    const ytdlp = spawn(
+      YT_DLP_BIN,
+      ['-f', YT_DLP_FORMAT, '--no-playlist', '--no-warnings', '-o', '-', query],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    this.ytdlp = ytdlp;
 
     const ffmpeg = spawn(
       FFMPEG_BIN,
       [
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
-        '-i', streamUrl,
+        '-i', 'pipe:0',
         '-analyzeduration', '0',
         '-loglevel', 'error',
         '-vn',
@@ -233,31 +222,57 @@ export class StreamPlayer extends EventEmitter {
         '-ac', '2',
         'pipe:1',
       ],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
+      { stdio: ['pipe', 'pipe', 'pipe'] },
     );
     this.ffmpeg = ffmpeg;
 
+    ytdlp.stdout.pipe(ffmpeg.stdin);
+    // pipe() 不會處理錯誤——其中一端提早結束時，另一端寫入/讀取會噴 EPIPE，這裡單純吃掉，
+    // 避免變成沒人接的 stream 'error' 事件把整個 process 弄掛，真正的錯誤通報交給下面
+    // 兩個 child process 各自的 'error'/'close' 處理。
+    ytdlp.stdout.on('error', () => {});
+    ffmpeg.stdin.on('error', () => {});
+
+    let ytdlpStderr = '';
+    ytdlp.stderr.on('data', (chunk: Buffer) => {
+      ytdlpStderr += chunk;
+    });
+    ytdlp.on('error', (err) => {
+      this.emit('error', new StreamPlayerError('無法啟動 yt-dlp，請確認伺服器已安裝', err));
+    });
+    ytdlp.on('close', (code) => {
+      if (code !== 0 && code !== null) {
+        this.emit(
+          'error',
+          new StreamPlayerError('下載音訊時發生錯誤，可能是網路或來源問題', ytdlpStderr.trim() || `yt-dlp exited with code ${code}`),
+        );
+      }
+    });
+
+    let ffmpegStderr = '';
+    ffmpeg.stderr.on('data', (chunk: Buffer) => {
+      ffmpegStderr += chunk;
+    });
     ffmpeg.on('error', (err) => {
       this.emit('error', new StreamPlayerError('音訊轉檔失敗，請確認伺服器已安裝 ffmpeg', err));
     });
-
-    let stderr = '';
-    ffmpeg.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk;
-    });
     ffmpeg.on('close', (code) => {
       if (code !== 0 && code !== null) {
-        this.emit('error', new StreamPlayerError('播放中斷，可能是網路或來源問題', stderr.trim()));
+        this.emit('error', new StreamPlayerError('播放中斷，可能是網路或來源問題', ffmpegStderr.trim()));
       }
     });
 
     return createAudioResource(ffmpeg.stdout, { inputType: StreamType.Raw });
   }
 
-  private killFfmpeg(): void {
+  private killPipeline(): void {
+    if (this.ytdlp && !this.ytdlp.killed) {
+      this.ytdlp.kill('SIGKILL');
+    }
     if (this.ffmpeg && !this.ffmpeg.killed) {
       this.ffmpeg.kill('SIGKILL');
     }
+    this.ytdlp = null;
     this.ffmpeg = null;
   }
 }
