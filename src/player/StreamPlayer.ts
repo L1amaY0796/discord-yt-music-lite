@@ -65,8 +65,18 @@ export class StreamPlayer extends EventEmitter {
 
   constructor(connection: VoiceConnection) {
     super();
-    this.player = createAudioPlayer();
+    this.player = createAudioPlayer({ debug: true });
     connection.subscribe(this.player);
+
+    const guildId = connection.joinConfig.guildId;
+
+    // TEMP: 診斷用，問題排除後移除。
+    this.player.on('debug', (message) => {
+      console.log(`[audio debug][guild ${guildId}] ${message}`);
+    });
+    this.player.on('stateChange', (oldState, newState) => {
+      console.log(`[audio state][guild ${guildId}] ${oldState.status} -> ${newState.status}`);
+    });
 
     this.player.on(AudioPlayerStatus.Idle, () => {
       const finished = this.current;
