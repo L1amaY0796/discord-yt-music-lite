@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dc-ytmusic-lite
+  labels:
+    app: dc-ytmusic-lite
+spec:
+  # in-memory Queue 綁在單一 process，不能水平擴展
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: dc-ytmusic-lite
+  template:
+    metadata:
+      labels:
+        app: dc-ytmusic-lite
+    spec:
+      # pi5 是 arm64，避免排到叢集裡其他架構的 node
+      nodeSelector:
+        kubernetes.io/arch: arm64
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      imagePullSecrets:
+        - name: ghcr-pull-secret
+      containers:
+        - name: dc-ytmusic-lite
+          image: ghcr.io/L1amaY0796/dc-ytmusic-lite:latest
+          imagePullPolicy: Always
+          env:
+            # 語音連線卡在 UDP IP Discovery 逾時的常見成因：解析到 IPv6 位址但該網路 IPv6 出口有問題，
+            # 強制優先用 IPv4 排除這個變因。
+            - name: NODE_OPTIONS
+              value: "--dns-result-order=ipv4first"
+          envFrom:
+            - secretRef:
+                name: dc-ytmusic-lite-secret
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
