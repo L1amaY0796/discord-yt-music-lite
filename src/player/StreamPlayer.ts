@@ -40,6 +40,7 @@ interface YtDlpMetadata {
   id?: string;
   title?: string;
   duration?: number;
+  is_live?: boolean;
 }
 
 // Typed event overloads for StreamPlayer's EventEmitter surface.
@@ -148,6 +149,10 @@ export class StreamPlayer extends EventEmitter {
       data = JSON.parse(stdout) as YtDlpMetadata;
     } catch (err) {
       throw new StreamPlayerError('無法解析歌曲資訊，請換一首試試', err);
+    }
+
+    if (data.is_live) {
+      throw new StreamPlayerError('目前不支援直播串流播放');
     }
 
     return {
