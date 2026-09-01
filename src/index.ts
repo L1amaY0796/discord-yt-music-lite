@@ -1,5 +1,7 @@
 import 'dotenv/config';
+import './logBuffer.js';
 import { Client, Events, GatewayIntentBits, REST, Routes } from 'discord.js';
+import * as logCommand from './commands/log.js';
 import { togglePauseMessage } from './commands/pause.js';
 import * as pauseCommand from './commands/pause.js';
 import * as playCommand from './commands/play.js';
@@ -22,7 +24,7 @@ const token: string = rawToken;
 const clientId: string = rawClientId;
 
 const commands = new Map<string, Command>(
-  [playCommand, skipCommand, pauseCommand, queueCommand, stopCommand].map((command) => [
+  [playCommand, skipCommand, pauseCommand, queueCommand, stopCommand, logCommand].map((command) => [
     command.data.name,
     command,
   ]),

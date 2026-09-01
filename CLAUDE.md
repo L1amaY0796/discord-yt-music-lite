@@ -18,8 +18,9 @@
 ## 專案結構
 src/
   index.ts
+  logBuffer.ts        ← 攔截 console.log/warn/error，供 /log 指令讀取
   commands/
-    play.ts / skip.ts / pause.ts / queue.ts / stop.ts
+    play.ts / skip.ts / pause.ts / queue.ts / stop.ts / log.ts
   player/
     StreamPlayer.ts   ← 核心，優先實作
     QueueManager.ts

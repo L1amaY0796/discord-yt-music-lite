@@ -1,6 +1,8 @@
 # dc-ytmusic-lite 規格書
 
-> 版本：v0.4　·　2026-08-31
+> 版本：v0.5　·　2026-09-01
+>
+> **v0.5 變更摘要**：新增 `/log` 指令（管理員專用，查看最近 log，不用 SSH 進伺服器）、擋掉直播播放並提示不支援。
 >
 > **v0.4 變更摘要**：校正本文件與目前 repo 實際狀態不一致的地方——`/play` 已拿掉關鍵字搜尋、`/pause` 是單一切換指令（沒有獨立的 `/resume`）、閒置逾時改為 5 分鐘且是寫死的常數（沒有 `IDLE_TIMEOUT_SEC` 環境變數）、錯誤訊息目前是通用訊息而非依錯誤類型細分、Dockerfile 與 k8s Deployment 規格改為如實反映 repo 裡的檔案內容。
 
@@ -25,6 +27,7 @@
 | 跳過 | `/skip` | 跳到下一首，無需投票 |
 | 停止 | `/stop` | 停止播放並清空 queue，退出頻道 |
 | 播放清單 | `/queue` | 顯示目前 queue 前 10 筆，附「還有 N 首」提示 |
+| 查看 log | `/log [lines]` | 顯示最近 N 行 log（預設 20，最多 50），不用 SSH 進伺服器；僅限伺服器管理員（`Administrator`），回覆為 ephemeral |
 
 播放中的訊息會附帶 ⏸️ 暫停/繼續、⏭️ 跳過兩顆按鈕，效果等同對應指令。
 
@@ -219,12 +222,14 @@ spec:
 dc-ytmusic-lite/
 ├── src/
 │   ├── index.ts              # 入口，登入 Discord、註冊指令
+│   ├── logBuffer.ts          # 攔截 console.log/warn/error，供 /log 讀取（in-memory，上限 200 行）
 │   ├── commands/
 │   │   ├── play.ts           # /play <url>（僅接受網址）
 │   │   ├── skip.ts           # /skip
 │   │   ├── pause.ts          # /pause（切換暫停/繼續）
 │   │   ├── queue.ts          # /queue（顯示前 10 筆）
 │   │   ├── stop.ts           # /stop + 清空 queue + 退出頻道
+│   │   ├── log.ts            # /log [lines]，僅限管理員
 │   │   └── types.ts          # Command 介面定義
 │   └── player/
 │       ├── SessionManager.ts # 每個 Guild 一組 {connection, player, queue}，含 race condition 防護

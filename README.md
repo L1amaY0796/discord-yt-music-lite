@@ -19,6 +19,7 @@
 | `/pause` | — | 暫停/繼續（同一指令切換） |
 | `/queue` | — | 顯示正在播放與待播清單（前 10 筆） |
 | `/stop` | — | 停止播放、清空佇列並離開語音頻道 |
+| `/log` | `lines`（選填，1-50，預設 20） | 查看機器人最近的 log，不用 SSH 進伺服器；僅限伺服器管理員，回覆為 ephemeral |
 
 佇列上限 50 首。
 
@@ -91,8 +92,9 @@ Image 是 arm64（`node:22-alpine`），要在 Raspberry Pi 5 原生 build，或
 ```
 src/
   index.ts               # 進入點，註冊指令、處理 interaction
+  logBuffer.ts             # 攔截 console.log/warn/error，供 /log 指令讀取（in-memory，上限 200 行）
   commands/
-    play.ts / skip.ts / pause.ts / queue.ts / stop.ts
+    play.ts / skip.ts / pause.ts / queue.ts / stop.ts / log.ts
   player/
     SessionManager.ts     # 每個 guild 的連線/播放器/閒置計時器
     StreamPlayer.ts        # yt-dlp + ffmpeg 播放管線
