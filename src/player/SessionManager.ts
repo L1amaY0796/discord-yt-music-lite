@@ -65,6 +65,17 @@ export class SessionManager {
     return this.queue.size(guildId);
   }
 
+  /** 清空待播佇列（不含播放中歌曲），回傳被清空的首數。 */
+  clearQueue(guildId: Snowflake): number {
+    const count = this.queue.size(guildId);
+    this.queue.clear(guildId);
+    return count;
+  }
+
+  removeLast(guildId: Snowflake): QueuedTrack | undefined {
+    return this.queue.removeLast(guildId);
+  }
+
   async join(
     guildId: Snowflake,
     voiceChannel: VoiceBasedChannel,

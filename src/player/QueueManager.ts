@@ -20,6 +20,11 @@ export class QueueManager {
     return this.queues.get(guildId)?.shift();
   }
 
+  /** 移除佇列最後一首（不含播放中歌曲）。 */
+  removeLast(guildId: string): QueuedTrack | undefined {
+    return this.queues.get(guildId)?.pop();
+  }
+
   /** /queue 顯示前 N 筆，預設 10。 */
   peek(guildId: string, limit = 10): QueuedTrack[] {
     return (this.queues.get(guildId) ?? []).slice(0, limit);
