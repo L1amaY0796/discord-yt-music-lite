@@ -1,4 +1,10 @@
-import { entersState, joinVoiceChannel, VoiceConnectionStatus, type VoiceConnection } from '@discordjs/voice';
+import {
+  entersState,
+  joinVoiceChannel,
+  VoiceConnectionDisconnectReason,
+  VoiceConnectionStatus,
+  type VoiceConnection,
+} from '@discordjs/voice';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -153,12 +159,20 @@ export class SessionManager {
 
     connection.on(VoiceConnectionStatus.Disconnected, (_oldState, newState) => {
       console.log(`[voice disconnected][guild ${guildId}] reason=${JSON.stringify(newState)}`);
+
+      // close code 4014：被踢出頻道，或頻道被刪除。這種情況不嘗試重連，直接視為離開——
+      // 犧牲「被拖去別的頻道會自動跟過去」這種邊緣情境，換取「被踢就是真的走」的確定行為。
+      if (
+        newState.reason === VoiceConnectionDisconnectReason.WebSocketClose &&
+        newState.closeCode === 4014
+      ) {
+        this.leave(guildId);
+        return;
+      }
+
       void (async () => {
         try {
-          await Promise.race([
-            entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-            entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
-          ]);
+          await entersState(connection, VoiceConnectionStatus.Connecting, 5_000);
           console.log(`[voice disconnected][guild ${guildId}] 重新連線成功`);
         } catch {
           console.log(`[voice disconnected][guild ${guildId}] 5 秒內未恢復，呼叫 leave()`);
