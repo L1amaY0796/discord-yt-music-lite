@@ -31,10 +31,6 @@
 - ffmpeg：純轉檔（PCM s16le 48kHz stereo），從 yt-dlp 的輸出 pipe 讀取，不直接打 CDN 網址
 - In-memory Queue（`Map<GuildId, Track[]>`），不做任何持久化
 
-### 為什麼播放是「yt-dlp 下載 → pipe → ffmpeg 轉檔」而不是「解析網址 → ffmpeg 直接打」
-
-早期版本是用 `yt-dlp -j` 解析出一次性的 googlevideo 直接網址，再交給 `ffmpeg -i <url>` 播。這個做法對 CDN 中途「軟性截斷」很脆弱：CDN 沒有真的斷線，而是提早把這次 HTTP 回應結束掉，ffmpeg 收到 EOF 後會誤判成正常播完、乾淨結束（exit code 0），完全不會觸發任何錯誤訊息——結果就是歌曲毫無預兆地提早結束、跳下一首。改成讓 yt-dlp 自己下載（`-o -`）再 pipe 給 ffmpeg 後，由 yt-dlp 處理這類 CDN 層級的重試/續傳邏輯，比 ffmpeg 單純的 `-reconnect` 系列參數可靠。
-
 ## 本機開發
 
 ### 前置需求
