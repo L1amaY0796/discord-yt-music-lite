@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 import type { SessionManager } from '../player/SessionManager.js';
 
 export const data = new SlashCommandBuilder().setName('skip').setDescription('跳過目前播放的歌曲');
@@ -11,7 +11,7 @@ export function skipMessage(sessions: SessionManager, guildId: string): string {
 
 export async function execute(interaction: ChatInputCommandInteraction, sessions: SessionManager): Promise<void> {
   if (!interaction.inCachedGuild()) {
-    await interaction.reply({ content: '這個指令只能在伺服器頻道中使用', ephemeral: true });
+    await interaction.reply({ content: '這個指令只能在伺服器頻道中使用', flags: MessageFlags.Ephemeral });
     return;
   }
 

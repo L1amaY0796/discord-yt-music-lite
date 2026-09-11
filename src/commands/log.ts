@@ -1,4 +1,4 @@
-import { PermissionFlagsBits, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { MessageFlags, PermissionFlagsBits, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 import { getRecentLines } from '../logBuffer.js';
 import type { SessionManager } from '../player/SessionManager.js';
 
@@ -21,14 +21,14 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction, _sessions: SessionManager): Promise<void> {
   if (!interaction.inCachedGuild()) {
-    await interaction.reply({ content: '這個指令只能在伺服器頻道中使用', ephemeral: true });
+    await interaction.reply({ content: '這個指令只能在伺服器頻道中使用', flags: MessageFlags.Ephemeral });
     return;
   }
 
   // setDefaultMemberPermissions 只是註冊時的預設值，伺服器管理員可能透過 Discord 的
   // Integrations 設定重新開放給其他身分組，這裡再檢查一次避免真的洩漏 log 給非管理員。
   if (!interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)) {
-    await interaction.reply({ content: '這個指令僅限伺服器管理員使用', ephemeral: true });
+    await interaction.reply({ content: '這個指令僅限伺服器管理員使用', flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -36,11 +36,11 @@ export async function execute(interaction: ChatInputCommandInteraction, _session
   const recent = getRecentLines(lineCount);
 
   if (recent.length === 0) {
-    await interaction.reply({ content: '目前沒有任何 log 記錄', ephemeral: true });
+    await interaction.reply({ content: '目前沒有任何 log 記錄', flags: MessageFlags.Ephemeral });
     return;
   }
 
-  await interaction.reply({ content: buildLogMessage(recent), ephemeral: true });
+  await interaction.reply({ content: buildLogMessage(recent), flags: MessageFlags.Ephemeral });
 }
 
 function codeBlock(body: string): string {

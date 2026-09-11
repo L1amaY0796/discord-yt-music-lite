@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 import { fetchYoutubeTitle } from '../player/oembed.js';
 import type { SessionManager } from '../player/SessionManager.js';
 
@@ -13,25 +13,25 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction, sessions: SessionManager): Promise<void> {
   if (!interaction.inCachedGuild()) {
-    await interaction.reply({ content: '這個指令只能在伺服器頻道中使用', ephemeral: true });
+    await interaction.reply({ content: '這個指令只能在伺服器頻道中使用', flags: MessageFlags.Ephemeral });
     return;
   }
 
   const voiceChannel = interaction.member.voice.channel;
   if (!voiceChannel) {
-    await interaction.reply({ content: '請先加入一個語音頻道', ephemeral: true });
+    await interaction.reply({ content: '請先加入一個語音頻道', flags: MessageFlags.Ephemeral });
     return;
   }
 
   const channel = interaction.channel;
   if (!channel) {
-    await interaction.reply({ content: '無法在此頻道使用', ephemeral: true });
+    await interaction.reply({ content: '無法在此頻道使用', flags: MessageFlags.Ephemeral });
     return;
   }
 
   const query = interaction.options.getString('query', true);
   if (!URL_PATTERN.test(query)) {
-    await interaction.reply({ content: '請提供有效的 YouTube 網址', ephemeral: true });
+    await interaction.reply({ content: '請提供有效的 YouTube 網址', flags: MessageFlags.Ephemeral });
     return;
   }
 

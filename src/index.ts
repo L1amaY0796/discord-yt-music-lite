@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import './logBuffer.js';
-import { Client, Events, GatewayIntentBits, REST, Routes } from 'discord.js';
+import { Client, Events, GatewayIntentBits, MessageFlags, REST, Routes } from 'discord.js';
 import * as clearCommand from './commands/clear.js';
 import * as logCommand from './commands/log.js';
 import { togglePauseMessage } from './commands/pause.js';
@@ -73,7 +73,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       if (interaction.deferred || interaction.replied) {
         await interaction.editReply(message).catch(() => {});
       } else {
-        await interaction.reply({ content: message, ephemeral: true }).catch(() => {});
+        await interaction.reply({ content: message, flags: MessageFlags.Ephemeral }).catch(() => {});
       }
     }
     return;
@@ -81,7 +81,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   if (interaction.isButton() && (interaction.customId === PAUSE_BUTTON_ID || interaction.customId === SKIP_BUTTON_ID)) {
     if (!interaction.inCachedGuild()) {
-      await interaction.reply({ content: '這個功能只能在伺服器頻道中使用', ephemeral: true });
+      await interaction.reply({ content: '這個功能只能在伺服器頻道中使用', flags: MessageFlags.Ephemeral });
       return;
     }
 
@@ -90,10 +90,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         interaction.customId === PAUSE_BUTTON_ID
           ? togglePauseMessage(sessions, interaction.guildId)
           : skipMessage(sessions, interaction.guildId);
-      await interaction.reply({ content: message, ephemeral: true });
+      await interaction.reply({ content: message, flags: MessageFlags.Ephemeral });
     } catch (err) {
       console.error(`按鈕 ${interaction.customId} 執行失敗`, err);
-      await interaction.reply({ content: '執行時發生錯誤', ephemeral: true }).catch(() => {});
+      await interaction.reply({ content: '執行時發生錯誤', flags: MessageFlags.Ephemeral }).catch(() => {});
     }
   }
 });
