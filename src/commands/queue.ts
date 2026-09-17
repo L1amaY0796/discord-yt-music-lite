@@ -1,4 +1,5 @@
 import { MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
+import { formatDuration } from '../player/StreamPlayer.js';
 import type { SessionManager } from '../player/SessionManager.js';
 
 export const data = new SlashCommandBuilder().setName('queue').setDescription('顯示目前佇列（前 10 筆）');
@@ -18,7 +19,10 @@ export async function execute(interaction: ChatInputCommandInteraction, sessions
     return;
   }
 
-  const lines: string[] = [nowPlaying ? `▶️ 正在播放：**${nowPlaying.title}**` : '▶️ 目前沒有播放中的歌曲'];
+  const duration = nowPlaying?.durationSec != null ? `[${formatDuration(nowPlaying.durationSec)}]` : '';
+  const lines: string[] = [
+    nowPlaying ? `▶️ 正在播放${duration}：**${nowPlaying.title}**` : '▶️ 目前沒有播放中的歌曲',
+  ];
 
   if (upcoming.length > 0) {
     lines.push('', `待播清單（共 ${total} 首，顯示前 ${upcoming.length} 首）：`);

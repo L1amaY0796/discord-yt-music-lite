@@ -16,7 +16,7 @@ import {
 } from 'discord.js';
 import { IdleWatcher } from './IdleWatcher.js';
 import { QueueManager } from './QueueManager.js';
-import { StreamPlayer, StreamPlayerError, type QueuedTrack, type ResolvedTrack } from './StreamPlayer.js';
+import { StreamPlayer, StreamPlayerError, formatDuration, type QueuedTrack, type ResolvedTrack } from './StreamPlayer.js';
 
 const JOIN_TIMEOUT_MS = 15_000;
 
@@ -143,8 +143,9 @@ export class SessionManager {
 
     player.on('trackStart', (track: ResolvedTrack) => {
       idleWatcher.cancel();
+      const duration = track.durationSec !== null ? `[${formatDuration(track.durationSec)}]` : '';
       void textChannel
-        .send({ content: `▶️ 正在播放：**${track.title}**`, components: [controlRow] })
+        .send({ content: `▶️ 正在播放${duration}：**${track.title}**`, components: [controlRow] })
         .catch(() => {});
     });
 

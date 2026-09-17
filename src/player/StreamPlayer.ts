@@ -24,6 +24,14 @@ export interface ResolvedTrack extends QueuedTrack {
   durationSec: number | null;
 }
 
+/** 秒數轉為 hh:mm:ss，供播放訊息顯示時長用。 */
+export function formatDuration(totalSeconds: number): string {
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.floor(totalSeconds % 60);
+  return [h, m, s].map((n) => String(n).padStart(2, '0')).join(':');
+}
+
 export class StreamPlayerError extends Error {
   constructor(message: string, readonly cause?: unknown) {
     super(message);
