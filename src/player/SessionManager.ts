@@ -138,6 +138,8 @@ export class SessionManager {
     // 只負責回報給使用者，不做流程控制——推進佇列一律交給下面的 trackEnd（Idle 轉場時觸發，
     // 不論正常播完還是播放中出錯都會走到這裡，避免 error 和 trackEnd 重複推進佇列）。
     player.on('error', (err: StreamPlayerError) => {
+      // err.cause 帶著 yt-dlp/ffmpeg 真正的 stderr，印出來才能事後用 /log 或 kubectl logs 查根因。
+      console.error(`[player error][guild ${guildId}] ${err.message}`, err.cause ?? '');
       void textChannel.send(`⚠️ ${err.message}`).catch(() => {});
     });
 
@@ -153,13 +155,11 @@ export class SessionManager {
       void this.playNext(guildId);
     });
 
-    // TEMP: 診斷用，問題排除後移除。
-    connection.on('stateChange', (oldState, newState) => {
-      console.log(`[voice state][guild ${guildId}] ${oldState.status} -> ${newState.status}`);
-    });
-
     connection.on(VoiceConnectionStatus.Disconnected, (_oldState, newState) => {
-      console.log(`[voice disconnected][guild ${guildId}] reason=${JSON.stringify(newState)}`);
+      // newState 裡的 connection/subscription 互相參照，不能整個 JSON.stringify（會丟
+      // circular structure 例外，沒人接住會讓整個 process crash）——只印需要的欄位。
+      const closeCode = newState.reason === VoiceConnectionDisconnectReason.WebSocketClose ? newState.closeCode : undefined;
+      console.log(`[voice disconnected][guild ${guildId}] reason=${newState.reason}${closeCode !== undefined ? ` closeCode=${closeCode}` : ''}`);
 
       // close code 4014：被踢出頻道，或頻道被刪除。這種情況不嘗試重連，直接視為離開——
       // 犧牲「被拖去別的頻道會自動跟過去」這種邊緣情境，換取「被踢就是真的走」的確定行為。
@@ -247,9 +247,6 @@ export class SessionManager {
   leave(guildId: Snowflake): void {
     const session = this.sessions.get(guildId);
     if (!session) return;
-
-    // TEMP: 診斷用，問題排除後移除。
-    console.log(`[leave][guild ${guildId}] 被呼叫`, new Error().stack);
 
     this.sessions.delete(guildId);
     session.idleWatcher.cancel();
