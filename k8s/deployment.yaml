@@ -21,7 +21,9 @@ spec:
       nodeSelector:
         kubernetes.io/arch: arm64
       hostNetwork: true
-      dnsPolicy: ClusterFirstWithHostNet
+      # 不需要解析叢集內服務；繞過 CoreDNS（ndots:5 + 多個 search domain 會讓 musl getaddrinfo 回 EAI_AGAIN），
+      # 直接用 pie5 本機的 resolver。
+      dnsPolicy: Default
       imagePullSecrets:
         - name: ghcr-pull-secret
       containers:
