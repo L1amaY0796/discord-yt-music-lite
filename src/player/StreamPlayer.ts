@@ -218,7 +218,14 @@ export class StreamPlayer extends EventEmitter {
 
     const ytdlp = spawn(
       YT_DLP_BIN,
-      ['-f', YT_DLP_FORMAT, '--no-playlist', '--no-warnings', '-o', '-', query],
+      [
+        '-f', YT_DLP_FORMAT, '--no-playlist', '--no-warnings',
+        // 下載速度受播放速度 backpressure 限制，長影片會被 CDN 週期性 reset；預設 --retries 10
+        // 是整首累計，長影片會用完。改成分段請求（每段新連線）並放寬重試次數。
+        '--retries', 'infinite',
+        '--http-chunk-size', '10M',
+        '-o', '-', query,
+      ],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
     this.ytdlp = ytdlp;
