@@ -144,7 +144,9 @@ export class SessionManager {
     });
 
     player.on('trackStart', (track: ResolvedTrack) => {
-      idleWatcher.cancel();
+      // 不直接 cancel()：頻道已經沒人時要讓倒數繼續，否則每換一首歌就取消一次，
+      // bot 會對著空頻道把整個佇列播完。
+      this.reconcileIdle(guildId);
       const duration = track.durationSec !== null ? `[${formatDuration(track.durationSec)}]` : '';
       void textChannel
         .send({ content: `▶️ 正在播放${duration}：**${track.title}**`, components: [controlRow] })
@@ -153,6 +155,11 @@ export class SessionManager {
 
     player.on('trackEnd', () => {
       void this.playNext(guildId);
+    });
+
+    // 沒有 listener 的話，語音網路層的 'error' 事件會被 EventEmitter 直接 throw，整個 process 掛掉。
+    connection.on('error', (err) => {
+      console.error(`[voice error][guild ${guildId}]`, err);
     });
 
     connection.on(VoiceConnectionStatus.Disconnected, (_oldState, newState) => {
@@ -257,6 +264,13 @@ export class SessionManager {
     }
   }
 
+  /** 離開所有語音頻道，供 process 收到終止訊號時收尾用。 */
+  leaveAll(): void {
+    for (const guildId of [...this.sessions.keys()]) {
+      this.leave(guildId);
+    }
+  }
+
   /** 頻道人數（排除機器人）或播放狀態變動時呼叫，重新評估是否該開始/取消閒置倒數。 */
   reconcileIdle(guildId: Snowflake): void {
     const session = this.sessions.get(guildId);
@@ -267,7 +281,9 @@ export class SessionManager {
     // 對於從未觸發過 voice state 事件的舊成員可能不準——這裡先接受這個「lite」限制。
     const humanCount = channel?.isVoiceBased() ? channel.members.filter((m) => !m.user.bot).size : 0;
 
-    const shouldBeIdle = !session.player.nowPlaying || humanCount === 0;
+    // advancing：正在解析下一首，不算「沒有在播」。
+    const notPlaying = !session.player.nowPlaying && !session.advancing;
+    const shouldBeIdle = notPlaying || humanCount === 0;
     if (shouldBeIdle) {
       session.idleWatcher.start();
     } else {

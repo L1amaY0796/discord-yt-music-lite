@@ -1,8 +1,13 @@
 import { MessageFlags, SlashCommandBuilder, type ChatInputCommandInteraction } from 'discord.js';
 import { fetchYoutubeTitle } from '../player/oembed.js';
 import type { SessionManager } from '../player/SessionManager.js';
+import { parseYoutubeUrl } from '../player/youtubeUrl.js';
 
-const URL_PATTERN = /^https?:\/\//i;
+const INVALID_URL_MESSAGES = {
+  invalid: '請提供有效的 YouTube 網址',
+  'not-youtube': '只支援 YouTube 網址',
+  'not-a-video': '請提供單一影片的網址（不支援播放清單或頻道網址）',
+} as const;
 
 export const data = new SlashCommandBuilder()
   .setName('play')
@@ -29,11 +34,13 @@ export async function execute(interaction: ChatInputCommandInteraction, sessions
     return;
   }
 
-  const query = interaction.options.getString('query', true);
-  if (!URL_PATTERN.test(query)) {
-    await interaction.reply({ content: '請提供有效的 YouTube 網址', flags: MessageFlags.Ephemeral });
+  const parsedUrl = parseYoutubeUrl(interaction.options.getString('query', true));
+  if (!parsedUrl.ok) {
+    await interaction.reply({ content: INVALID_URL_MESSAGES[parsedUrl.reason], flags: MessageFlags.Ephemeral });
     return;
   }
+  // 正規化後的網址（只留影片 ID），之後 oEmbed、佇列、yt-dlp 都用這個。
+  const query = parsedUrl.url;
 
   await interaction.deferReply();
 
