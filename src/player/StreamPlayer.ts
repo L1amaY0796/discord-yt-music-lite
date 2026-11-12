@@ -43,6 +43,21 @@ const YT_DLP_BIN = 'yt-dlp';
 const FFMPEG_BIN = 'ffmpeg';
 const RESOLVE_TIMEOUT_MS = 15_000;
 const YT_DLP_FORMAT = 'bestaudio[protocol!=m3u8]/bestaudio/best';
+// 解析與下載共用的參數。
+// --js-runtimes node：YouTube 的 signature / n challenge 需要外部 JS runtime 才解得出來，
+// yt-dlp 預設只啟用 deno；映像檔裡本來就有 node，直接指定它，不必另外裝 deno。
+// 刻意不加 --no-warnings：runtime 缺失、解題失敗這類問題只會以 WARNING 出現，藏掉就查不到根因。
+const YT_DLP_COMMON_ARGS = ['-f', YT_DLP_FORMAT, '--no-playlist', '--js-runtimes', 'node'];
+// stderr 只保留尾段，避免長時間播放時無上限累積。
+const STDERR_TAIL_CHARS = 4_000;
+// 連續讀不到音訊 frame（每個 20ms）超過這個數量才視為播完。預設值 5（100ms）太敏感：
+// yt-dlp 換連線/重試造成的短暫斷流會被當成正常結束，歌曲無聲無息提早跳下一首。250 ≈ 5 秒。
+const MAX_MISSED_FRAMES = 250;
+
+function appendTail(current: string, chunk: Buffer): string {
+  const next = current + chunk.toString();
+  return next.length > STDERR_TAIL_CHARS ? next.slice(-STDERR_TAIL_CHARS) : next;
+}
 
 interface YtDlpMetadata {
   id?: string;
@@ -74,7 +89,7 @@ export class StreamPlayer extends EventEmitter {
 
   constructor(connection: VoiceConnection) {
     super();
-    this.player = createAudioPlayer();
+    this.player = createAudioPlayer({ behaviors: { maxMissedFrames: MAX_MISSED_FRAMES } });
     connection.subscribe(this.player);
 
     this.player.on(AudioPlayerStatus.Idle, () => {
@@ -138,7 +153,7 @@ export class StreamPlayer extends EventEmitter {
   }
 
   private async resolve(track: QueuedTrack): Promise<ResolvedTrack> {
-    const args = ['-f', YT_DLP_FORMAT, '--no-playlist', '--no-warnings', '-j', track.query];
+    const args = [...YT_DLP_COMMON_ARGS, '-j', track.query];
 
     const stdout = await this.runYtDlp(args);
 
@@ -176,7 +191,7 @@ export class StreamPlayer extends EventEmitter {
         stdout += chunk;
       });
       proc.stderr.on('data', (chunk: Buffer) => {
-        stderr += chunk;
+        stderr = appendTail(stderr, chunk);
       });
 
       proc.on('error', (err) => {
@@ -194,6 +209,10 @@ export class StreamPlayer extends EventEmitter {
             ),
           );
           return;
+        }
+        // -j 模式下 stderr 只會有警告，成功時也印出來供 /log 與 kubectl logs 查看。
+        if (stderr.trim()) {
+          console.warn(`[yt-dlp resolve] ${stderr.trim()}`);
         }
 
         const firstLine = stdout.split('\n').find((line) => line.trim().length > 0);
@@ -219,7 +238,9 @@ export class StreamPlayer extends EventEmitter {
     const ytdlp = spawn(
       YT_DLP_BIN,
       [
-        '-f', YT_DLP_FORMAT, '--no-playlist', '--no-warnings',
+        ...YT_DLP_COMMON_ARGS,
+        // 關掉進度條與一般訊息，stderr 只留警告與錯誤。
+        '--quiet',
         // 下載速度受播放速度 backpressure 限制，長影片會被 CDN 週期性 reset；預設 --retries 10
         // 是整首累計，長影片會用完。改成分段請求（每段新連線）並放寬重試次數。
         '--retries', 'infinite',
@@ -255,7 +276,7 @@ export class StreamPlayer extends EventEmitter {
 
     let ytdlpStderr = '';
     ytdlp.stderr.on('data', (chunk: Buffer) => {
-      ytdlpStderr += chunk;
+      ytdlpStderr = appendTail(ytdlpStderr, chunk);
     });
     ytdlp.on('error', (err) => {
       this.emit('error', new StreamPlayerError('無法啟動 yt-dlp，請確認伺服器已安裝', err));
@@ -266,12 +287,14 @@ export class StreamPlayer extends EventEmitter {
           'error',
           new StreamPlayerError('下載音訊時發生錯誤，可能是網路或來源問題', ytdlpStderr.trim() || `yt-dlp exited with code ${code}`),
         );
+      } else if (code === 0 && ytdlpStderr.trim()) {
+        console.warn(`[yt-dlp download] ${ytdlpStderr.trim()}`);
       }
     });
 
     let ffmpegStderr = '';
     ffmpeg.stderr.on('data', (chunk: Buffer) => {
-      ffmpegStderr += chunk;
+      ffmpegStderr = appendTail(ffmpegStderr, chunk);
     });
     ffmpeg.on('error', (err) => {
       this.emit('error', new StreamPlayerError('音訊轉檔失敗，請確認伺服器已安裝 ffmpeg', err));

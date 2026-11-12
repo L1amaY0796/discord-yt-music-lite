@@ -42,6 +42,8 @@ spec:
             requests:
               cpu: 100m
               memory: 128Mi
+            # 256Mi 時 yt-dlp 啟動的 JS runtime（解 YouTube challenge 用）會被 OOM kill（returncode -9），
+            # 500m 則容易在 yt-dlp + ffmpeg + node 同時跑時被 throttle 造成斷流。
             limits:
-              cpu: 500m
-              memory: 256Mi
+              cpu: 1000m
+              memory: 512Mi
